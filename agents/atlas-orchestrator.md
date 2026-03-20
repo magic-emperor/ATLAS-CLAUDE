@@ -163,25 +163,60 @@ On both tasks complete:
   Update plan.md Phase 3 → COMPLETE
 ```
 
-## Phase 4 — Integration (future)
+## Phase 4 — Integration
 
 ```
-[Not implemented in Phase 1 MVP]
-[atlas-integration — future]
+Task: atlas-integration
+  Pass: frontend-api-calls.md + architecture-proposal.md + decisions.json
+  Receive: integration-fixes.md with sign-off
+
+IF architecture gaps found:
+  Surface ONE question per gap to human
+  Wait for decision before proceeding
+
+On sign-off received:
+  Create rollback point: rp_004_integration_complete
+  Update plan.md Phase 4 → COMPLETE
 ```
 
-## Phase 5 — Testing (future)
+## Phase 5 — Testing
 
 ```
-[Not implemented in Phase 1 MVP]
-[atlas-testing — future]
+Task: atlas-testing
+  Pass: integration-fixes.md + function-registry.json + stack.json
+  Receive: test results + coverage report + bug registry updates
+
+IF critical bugs found:
+  Do NOT present Checkpoint C
+  Surface bug list to human with severity breakdown
+  Wait for direction before proceeding
+
+IF all critical bugs fixed + coverage >= 80%:
+  HUMAN CHECKPOINT C (see atlas-testing.md for format)
+  Wait for APPROVE
+
+On APPROVE:
+  Create rollback point: rp_005_testing_complete
+  Update plan.md Phase 5 → COMPLETE
 ```
 
-## Phase 6 — Scaling Analysis (future)
+## Phase 6 — Scaling Analysis
 
 ```
-[Not implemented in Phase 1 MVP]
-[atlas-scaling — future]
+Read atlas.config.json → checkpoints.prompt_scaling_phase_6
+IF false: skip phase, update plan.md Phase 6 → SKIPPED
+
+IF true:
+  Task: atlas-scaling
+    Pass: architecture-proposal.md + function-registry.json + stack.json
+    Receive: scaling-report.md
+
+  Present to human:
+    "ATLAS — Scaling Analysis Ready
+    scaling-report.md is available for review.
+    Type: REVIEW to discuss recommendations or DONE to complete"
+
+  Update plan.md Phase 6 → COMPLETE
 ```
 
 ## Post-Pipeline
