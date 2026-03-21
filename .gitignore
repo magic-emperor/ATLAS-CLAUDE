@@ -5,3 +5,7 @@ dist/
 *.log
 .env
 .env.local
+
+# ATLAS config contains real API keys — NEVER commit this file
+# Use atlas.config.example.json as the committed template instead
+atlas.config.json

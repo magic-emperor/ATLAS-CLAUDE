@@ -46,6 +46,24 @@ export class ATLASEngine {
 
   async initialize(): Promise<void> {
     this.config = await this.loadConfig()
+
+    // Promote api_keys from atlas.config.json into process.env
+    // (env vars always take priority — only set if env var is not already set)
+    if (this.config.api_keys) {
+      const keys = this.config.api_keys as Record<string, string>
+      const envVarNames = [
+        'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_AI_API_KEY',
+        'GROQ_API_KEY', 'DEEPSEEK_API_KEY', 'MISTRAL_API_KEY',
+        'V0_API_KEY', 'LOVABLE_API_KEY', 'LOCAL_OLLAMA_ENDPOINT'
+      ]
+      for (const envVar of envVarNames) {
+        const value = keys[envVar]
+        if (value && !process.env[envVar]) {
+          process.env[envVar] = value
+        }
+      }
+    }
+
     this.routingTable = await buildRoutingTable(this.config)
     this.ns = new NervousSystem(this.projectDir)
     this.runner = new AgentRunner(this.projectDir)
@@ -58,10 +76,6 @@ export class ATLASEngine {
     const { command, description, onProgress } = options
 
     onProgress?.(`ATLAS — session ${this.sessionId}`)
-    onProgress?.(`Providers active: ${this.routingTable.providers_active.join(', ')}`)
-    for (const note of this.routingTable.session_notes) {
-      onProgress?.(`  ${note}`)
-    }
 
     switch (command) {
       case 'new':     await this.runNew(description ?? '', options); break
@@ -164,26 +178,41 @@ export class ATLASEngine {
 
   private async runStatus(hooks: Hooks): Promise<void> {
     const { onProgress } = hooks
-    const sep = '━'.repeat(48)
 
-    onProgress?.(`\n${sep}`)
-    onProgress?.('ATLAS STATUS')
-    onProgress?.(sep)
-    onProgress?.(`Providers active: ${this.routingTable.providers_active.join(', ')}`)
-    onProgress?.(sep)
-    onProgress?.('Agent routing:')
-    for (const [agent, r] of Object.entries(this.routingTable.session_routing_table)) {
-      onProgress?.(`  ${agent.padEnd(30)} ${r.provider}/${r.model}`)
-    }
-    onProgress?.(sep)
+    // Providers
+    const active = this.routingTable.providers_active
+    onProgress?.(`Providers: ${active.length > 0 ? active.join(', ') : 'none detected — set an API key'}`)
 
+    // Project state — read index files only (no agents, no token burn)
+    const atlasDir = path.join(this.projectDir, '.atlas')
     if (await this.ns.exists()) {
-      const plan = await this.ns.readPlan()
-      onProgress?.('\nCurrent plan:\n' + plan)
+      const taskIndexPath  = path.join(atlasDir, 'task-index.json')
+      const planIndexPath  = path.join(atlasDir, 'plan-index.json')
+      const briefPath      = path.join(atlasDir, 'context', 'session-brief.md')
+
+      if (existsSync(taskIndexPath)) {
+        const ti = JSON.parse(await readFile(taskIndexPath, 'utf-8')) as {
+          total: number; summary: { complete: number; in_progress: number; blocked: number }
+        }
+        onProgress?.(`Tasks: ${ti.summary.complete}/${ti.total} complete, ${ti.summary.in_progress} in progress, ${ti.summary.blocked} blocked`)
+      }
+
+      if (existsSync(planIndexPath)) {
+        const pi = JSON.parse(await readFile(planIndexPath, 'utf-8')) as {
+          current_phase: string; current_milestone: string
+        }
+        onProgress?.(`Phase: ${pi.current_phase || 'none'} | Milestone: ${pi.current_milestone || 'MVP'}`)
+      }
+
+      if (!existsSync(taskIndexPath) && !existsSync(planIndexPath)) {
+        // Old-style .atlas/ — show plan summary only
+        const plan = await this.ns.readPlan()
+        const firstLine = plan.split('\n').find(l => l.trim()) ?? '(no plan)'
+        onProgress?.(`Project loaded — ${firstLine}`)
+      }
     } else {
-      onProgress?.('\nNo .atlas/ found. Run atlas new to start.')
+      onProgress?.('No project loaded   →  atlas new "describe what to build"')
     }
-    onProgress?.(sep + '\n')
   }
 
   // ── atlas sync ──────────────────────────────────────────────────────────────
