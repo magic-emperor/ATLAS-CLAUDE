@@ -1,6 +1,6 @@
 {
   "name": "@atlas/core",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "ATLAS core engine — autonomous multi-agent development framework",
   "type": "module",
   "main": "./dist/index.js",
@@ -27,5 +27,8 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
