@@ -233,3 +233,171 @@ export interface ClassificationResult {
   unknown_critical: string[]
   suggested_questions: string[]
 }
+
+// ─── Phase 2: Task System ────────────────────────────────────────────────────
+
+export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'COMPLETE' | 'BLOCKED' | 'ROLLED_BACK'
+
+export interface TaskUpdate {
+  session: string
+  date: string
+  type: 'status_change' | 'note' | 'completion'
+  note: string
+  affected_files?: string[]
+}
+
+export interface Task {
+  id: string
+  title: string
+  status: TaskStatus
+  phase: string
+  folder_scope: string
+  description: string
+  keywords: string[]
+  depends_on: string[]
+  affects_files: string[]
+  milestone: string
+  created_in_session: string
+  created_date: string
+  blocked_reason?: string
+  session_completed?: string
+  updates: TaskUpdate[]
+}
+
+export interface TaskIndexEntry {
+  id: string
+  title: string
+  status: TaskStatus
+  phase: string
+  folder: string
+  keywords: string[]
+  depends_on: string[]
+  affects_files: string[]
+  milestone: string
+  session_completed?: string
+}
+
+export interface TaskIndex {
+  total: number
+  last_updated: string
+  last_updated_date: string
+  current_milestone?: string
+  summary: {
+    complete: number
+    in_progress: number
+    blocked: number
+    todo: number
+    rolled_back: number
+  }
+  tasks: TaskIndexEntry[]
+  keywords_index: Record<string, string[]>
+  files_index: Record<string, string[]>
+  next_task_number: number
+}
+
+export interface ImpactAnalysis {
+  new_task_description: string
+  related_tasks: Array<{
+    task_id: string
+    title: string
+    relationship: 'depends_on' | 'modifies' | 'extends' | 'conflicts'
+    reason: string
+    requires_update: boolean
+    update_description?: string
+  }>
+  affected_files: string[]
+  recommended_phase: string
+  creates_new_task: boolean
+  new_task_draft: {
+    title: string
+    keywords: string[]
+    folder_scope: string
+    depends_on: string[]
+    status: TaskStatus
+    milestone: string
+  }
+}
+
+// ─── Phase 2: Goal / Scope ──────────────────────────────────────────────────
+
+export interface ProjectGoal {
+  what: string
+  why: string
+  success_criteria: string[]
+  out_of_scope: Array<{ item: string; reason: string }>
+  constraints: {
+    tech_stack?: string[]
+    timeline?: string
+    team_size?: number
+  }
+  milestones: Array<{ name: string; description: string }>
+  created_date: string
+  last_updated_date?: string
+  version: number
+}
+
+export interface ScopeCheckResult {
+  in_scope: boolean
+  confidence: 'high' | 'medium' | 'low'
+  reasoning: string
+  recommendation: 'PROCEED' | 'CLARIFY' | 'BLOCK'
+  conflicting_oos?: string
+  matching_criteria?: string
+}
+
+// ─── Phase 2: Plan ──────────────────────────────────────────────────────────
+
+export type PhaseStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETE' | 'SKIPPED'
+
+export interface PlanPhase {
+  id: string
+  number: number
+  name: string
+  goal: string
+  approach: string
+  key_decisions: Array<{ decision: string; why: string }>
+  success_criteria: string[]
+  milestone: string
+  status: PhaseStatus
+  task_ids: string[]
+  started_date?: string
+  completed_date?: string
+}
+
+export interface PlanVersion {
+  version: number
+  created_date: string
+  created_in_session: string
+  status: 'ACTIVE' | 'SUPERSEDED' | 'ABANDONED'
+  approved_by_human: boolean
+  approved_date?: string
+  phases: PlanPhase[]
+}
+
+export interface PlanIndex {
+  current_version: number
+  last_updated: string
+  current_phase: string
+  current_milestone: string
+  phases: Array<{
+    id: string
+    name: string
+    status: PhaseStatus
+    task_count: number
+    tasks_complete: number
+    summary: string
+    milestone: string
+  }>
+}
+
+// ─── Phase 2: Session Brief ─────────────────────────────────────────────────
+
+export interface SessionBrief {
+  session_id: string
+  generated_at: string
+  providers: string[]
+  goal_summary: string
+  plan_summary: string
+  task_summary: string
+  open_questions: number
+}

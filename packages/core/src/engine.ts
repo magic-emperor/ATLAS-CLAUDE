@@ -13,6 +13,10 @@ import type {
 import { buildRoutingTable } from './providers/index.js'
 import { AgentRunner } from './agent-runner.js'
 import { NervousSystem } from './memory/nervous-system.js'
+import { GoalGuardian } from './memory/goal-guardian.js'
+import { TaskManager } from './memory/task-manager.js'
+import { PlanManager } from './memory/plan-manager.js'
+import { SessionBriefManager } from './memory/session-brief.js'
 import { ToolExecutor } from './tool-executor.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -26,6 +30,10 @@ export class ATLASEngine {
   private config!: ATLASConfig
   private routingTable!: RoutingTable
   private ns!: NervousSystem
+  private goalGuardian!: GoalGuardian
+  private taskManager!: TaskManager
+  private planManager!: PlanManager
+  private briefManager!: SessionBriefManager
   private runner!: AgentRunner
   private tools!: ToolExecutor
   private agentsDir: string
@@ -66,8 +74,22 @@ export class ATLASEngine {
 
     this.routingTable = await buildRoutingTable(this.config)
     this.ns = new NervousSystem(this.projectDir)
+    this.goalGuardian = new GoalGuardian(this.projectDir)
+    this.taskManager = new TaskManager(this.projectDir)
+    this.planManager = new PlanManager(this.projectDir)
+    this.briefManager = new SessionBriefManager(
+      this.projectDir,
+      this.goalGuardian,
+      this.taskManager,
+      this.planManager,
+      this.ns
+    )
     this.runner = new AgentRunner(this.projectDir)
     this.tools = new ToolExecutor(this.projectDir)
+
+    // Initialize task + plan indexes (creates files if first run)
+    await this.taskManager.initialize()
+    await this.planManager.initialize()
   }
 
   async run(options: ATLASRunOptions): Promise<void> {
@@ -226,6 +248,130 @@ export class ATLASEngine {
   }
 
   // ── Phase helpers ───────────────────────────────────────────────────────────
+
+  // ─── Phase 2: Session context ─────────────────────────────────────────────
+
+  private async loadSessionContext(onProgress?: (msg: string) => void): Promise<string> {
+    try {
+      const brief = await this.briefManager.generate(
+        this.sessionId,
+        this.routingTable.providers_active
+      )
+      return brief
+    } catch {
+      return ''
+    }
+  }
+
+  // ─── Phase 2: Scope guard ─────────────────────────────────────────────────
+
+  private async checkScopeGuard(
+    description: string,
+    onProgress?: (msg: string) => void
+  ): Promise<boolean> {
+    if (!this.goalGuardian.exists()) return true
+
+    const result = await this.goalGuardian.checkScope(description)
+
+    if (result.recommendation === 'BLOCK') {
+      onProgress?.(`⛔ SCOPE GUARD: ${result.reasoning}`)
+      onProgress?.('To proceed: update .atlas/goal.md manually and re-run.')
+      return false
+    }
+
+    if (result.recommendation === 'CLARIFY') {
+      onProgress?.(`⚠ SCOPE UNCLEAR: ${result.reasoning}`)
+      // Surface as warning only — don't block
+    }
+
+    return true
+  }
+
+  // ─── Phase 2: Plan gate ───────────────────────────────────────────────────
+
+  private async ensurePlanExists(
+    description: string,
+    hooks: Hooks
+  ): Promise<boolean> {
+    const { onProgress, onCheckpoint, onAgentOutput } = hooks
+
+    if (this.planManager.exists()) return true
+
+    onProgress?.('\nNo implementation plan found — creating one before building...')
+
+    const planResponse = await this.runner.run({
+      agentName: 'atlas-planner',
+      userMessage: `Create implementation plan for: ${description}`,
+      projectDir: this.projectDir,
+      agentsDir: this.agentsDir,
+      routingTable: this.routingTable,
+      onProgress
+    })
+
+    onAgentOutput?.('atlas-planner', planResponse.content)
+
+    if (onCheckpoint) {
+      const checkpoint: Checkpoint = {
+        type: 'BLOCKER',
+        title: 'Implementation Plan Approval',
+        completed: ['Goal analysis', 'Phase breakdown', 'Task drafts created'],
+        question: 'Review the plan before code is written. Approve to proceed, or describe changes.',
+        options: [
+          { label: 'APPROVE', tradeoff: 'Build starts immediately' },
+          { label: 'REQUEST CHANGES', tradeoff: 'Plan revised, then re-reviewed' }
+        ],
+        supportingDoc: '.atlas/implementation-plan.md'
+      }
+
+      const response = await onCheckpoint(checkpoint)
+
+      if (!response.toUpperCase().includes('APPROVE') && response !== 'A') {
+        const revisedPlan = await this.runner.run({
+          agentName: 'atlas-planner',
+          userMessage: `Revise plan based on feedback: ${response}\n\nOriginal plan:\n${planResponse.content}`,
+          projectDir: this.projectDir,
+          agentsDir: this.agentsDir,
+          routingTable: this.routingTable,
+          onProgress
+        })
+        onAgentOutput?.('atlas-planner', revisedPlan.content)
+      }
+    }
+
+    return true
+  }
+
+  // ─── Phase 2: Impact analysis ─────────────────────────────────────────────
+
+  private async runImpactAnalysis(
+    description: string,
+    onProgress?: (msg: string) => void
+  ): Promise<string> {
+    onProgress?.('Analyzing impact on existing work...')
+    const keywords = description.toLowerCase().split(/\s+/).filter(w => w.length > 3)
+    const folderScope = this.inferFolderScope(description)
+    const analysis = await this.taskManager.analyzeImpact(description, keywords, folderScope)
+
+    if (analysis.related_tasks.length > 0) {
+      onProgress?.(`Found ${analysis.related_tasks.length} related task(s):`)
+      for (const r of analysis.related_tasks) {
+        const flag = r.requires_update ? ' ← NEEDS UPDATE' : ''
+        onProgress?.(`  ${r.task_id}: ${r.title} (${r.relationship})${flag}`)
+      }
+    }
+
+    return JSON.stringify(analysis, null, 2)
+  }
+
+  private inferFolderScope(description: string): string {
+    const lower = description.toLowerCase()
+    if (lower.includes('auth') || lower.includes('login') || lower.includes('password')) return 'src/auth/'
+    if (lower.includes('api') || lower.includes('endpoint') || lower.includes('route')) return 'src/api/'
+    if (lower.includes('dashboard') || lower.includes('ui') || lower.includes('component')) return 'src/components/'
+    if (lower.includes('database') || lower.includes('migration') || lower.includes('schema')) return 'src/db/'
+    if (lower.includes('test')) return 'src/__tests__/'
+    return 'src/'
+  }
 
   private async classify(description: string, hooks: Hooks): Promise<ClassificationResult> {
     const stack = await this.ns.readStack()

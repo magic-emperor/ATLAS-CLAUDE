@@ -233,6 +233,30 @@ ${current}
     return { decisions, actions, openQuestions, stack: stack as TechStack, bugs }
   }
 
+  // ─── Phase 2: Rollback integration ──────────────────────────────────────────
+
+  async markTasksRolledBack(
+    rollbackTimestamp: string,
+    taskManager: import('./task-manager.js').TaskManager,
+    sessionId: string
+  ): Promise<void> {
+    const index = await taskManager.readIndex()
+    for (const task of index.tasks) {
+      if (
+        task.status === 'COMPLETE' &&
+        task.session_completed &&
+        task.session_completed > rollbackTimestamp
+      ) {
+        await taskManager.updateTaskStatus(
+          task.id,
+          'ROLLED_BACK',
+          sessionId,
+          `Rolled back — code reverted to state before ${rollbackTimestamp}`
+        )
+      }
+    }
+  }
+
   // ── Private Helpers ──────────────────────────────────────────────────────────
 
   private async appendToBugsFile(bug: Bug): Promise<void> {
