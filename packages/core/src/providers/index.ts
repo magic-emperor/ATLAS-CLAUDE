@@ -14,6 +14,8 @@ export {
   OllamaProvider,
   BaseProvider
 }
+export { discoverProviderModels, envVarToProvider, providerToEnvVar } from './discover.js'
+export type { DiscoveryResult, DiscoveredTiers } from './discover.js'
 
 // Build the right provider instance for a given model+provider string
 export function buildProvider(model: string, provider: string): BaseProvider {
@@ -35,28 +37,42 @@ export function buildProvider(model: string, provider: string): BaseProvider {
   }
 }
 
-// Detect which providers are available based on env vars + Ollama check
-export async function detectAvailableProviders(): Promise<Set<string>> {
+// Detect which providers are available based on env vars + Ollama check.
+//
+// explicitlyDisabled: providers where the key in atlas.config.json is ""
+//   (empty string = user explicitly says "don't use this provider")
+//   This takes priority over env vars so users can opt-out of system env keys.
+export async function detectAvailableProviders(
+  explicitlyDisabled?: Set<string>
+): Promise<Set<string>> {
   const available = new Set<string>()
+  const disabled = explicitlyDisabled ?? new Set<string>()
 
-  if (process.env['ANTHROPIC_API_KEY']) available.add('anthropic')
-  if (process.env['OPENAI_API_KEY']) available.add('openai')
-  if (process.env['GOOGLE_AI_API_KEY']) available.add('google')
-  if (process.env['GROQ_API_KEY']) available.add('groq')
-  if (process.env['DEEPSEEK_API_KEY']) available.add('deepseek')
-  if (process.env['MISTRAL_API_KEY']) available.add('mistral')
-  if (process.env['V0_API_KEY']) available.add('v0')
-  if (process.env['LOVABLE_API_KEY']) available.add('lovable')
+  function addIfEnabled(provider: string, envKey: string): void {
+    if (disabled.has(provider)) return  // explicit empty key in config = disabled
+    if (process.env[envKey]) available.add(provider)
+  }
 
-  // Test local Ollama — non-blocking
-  const ollamaEndpoint = process.env['LOCAL_OLLAMA_ENDPOINT'] ?? 'http://localhost:11434'
-  try {
-    const res = await fetch(`${ollamaEndpoint}/api/tags`, {
-      signal: AbortSignal.timeout(2000)
-    })
-    if (res.ok) available.add('local')
-  } catch {
-    // Not available — skip silently
+  addIfEnabled('anthropic', 'ANTHROPIC_API_KEY')
+  addIfEnabled('openai',    'OPENAI_API_KEY')
+  addIfEnabled('google',    'GOOGLE_AI_API_KEY')
+  addIfEnabled('groq',      'GROQ_API_KEY')
+  addIfEnabled('deepseek',  'DEEPSEEK_API_KEY')
+  addIfEnabled('mistral',   'MISTRAL_API_KEY')
+  addIfEnabled('v0',        'V0_API_KEY')
+  addIfEnabled('lovable',   'LOVABLE_API_KEY')
+
+  // Local Ollama — opt-in only (excluded from auto routing, but shown in status)
+  if (!disabled.has('local')) {
+    const ollamaEndpoint = process.env['LOCAL_OLLAMA_ENDPOINT'] ?? 'http://localhost:11434'
+    try {
+      const res = await fetch(`${ollamaEndpoint}/api/tags`, {
+        signal: AbortSignal.timeout(2000)
+      })
+      if (res.ok) available.add('local')
+    } catch {
+      // Not running — skip silently
+    }
   }
 
   return available
@@ -177,8 +193,22 @@ export async function buildRoutingTable(config: ATLASConfig): Promise<RoutingTab
     }
   }
 
-  // 2. Detect which providers are actually available (key present + non-empty)
-  const available = await detectAvailableProviders()
+  // 2. Build the "explicitly disabled" set:
+  //    any provider whose key is set to "" in atlas.config.json is excluded,
+  //    even if the env var is set (e.g. ANTHROPIC_API_KEY in system environment)
+  const explicitlyDisabled = new Set<string>()
+  const apiKeys = config.api_keys
+  if (apiKeys.ANTHROPIC_API_KEY === '')    explicitlyDisabled.add('anthropic')
+  if (apiKeys.OPENAI_API_KEY === '')       explicitlyDisabled.add('openai')
+  if (apiKeys.GOOGLE_AI_API_KEY === '')    explicitlyDisabled.add('google')
+  if (apiKeys.GROQ_API_KEY === '')         explicitlyDisabled.add('groq')
+  if (apiKeys.DEEPSEEK_API_KEY === '')     explicitlyDisabled.add('deepseek')
+  if (apiKeys.MISTRAL_API_KEY === '')      explicitlyDisabled.add('mistral')
+  if (apiKeys.V0_API_KEY === '')           explicitlyDisabled.add('v0')
+  if (apiKeys.LOVABLE_API_KEY === '')      explicitlyDisabled.add('lovable')
+
+  // 3. Detect which providers are actually available
+  const available = await detectAvailableProviders(explicitlyDisabled)
 
   if (available.size === 0) {
     const msg = config.fallback_strategy.on_hard_stop_message
