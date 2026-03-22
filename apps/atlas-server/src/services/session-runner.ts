@@ -41,7 +41,7 @@ export class SessionRunner {
     const showTerminal = process.env['ATLAS_SHOW_TERMINAL'] === '1'
 
     const child = showTerminal
-      ? spawn('cmd.exe', ['/c', `start cmd /k "atlas ${atlasArgs.join(' ')} & pause"`], {
+      ? spawn('cmd.exe', ['/c', `start "ATLAS Session" cmd /k "atlas ${atlasArgs.join(' ')}"`], {
           cwd: projectDir,
           env: { ...process.env, ...userKeys, ATLAS_SESSION_ID: this.sessionId, ATLAS_SERVER_MODE: '1' },
           shell: false,
